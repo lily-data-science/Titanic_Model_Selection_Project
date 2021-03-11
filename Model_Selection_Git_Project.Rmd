@@ -1,5 +1,5 @@
 ---
-title: "Model Selection Project"
+title: "Titanic Model Selection Project"
 author: YunweiChang
 output:
   pdf_document: default 
@@ -769,6 +769,28 @@ ROCit_nb <- rocit(score=titanic_train2_nb,class=titanic_train2_testing$survived,
 plot(ROCit_nb)
 ```
 
+
+## Compare all different models through ROC Curves
+
+
+```{r}
+ROCit_null <- rocit(score=titanic_train2_null,class=titanic_train2_testing$survived, method = "emp")
+plot(ROCit_null, col ="black", legend = FALSE, YIndex = FALSE)
+lines(ROCit_knn$TPR~ROCit_knn$FPR, col ="yellow")
+lines(ROCit_C50$TPR~ROCit_C50$FPR, col ="blue")
+lines(ROCit_randomforest$TPR~ROCit_randomforest$FPR, col ="red")
+lines(ROCit_glm$TPR~ROCit_glm$FPR, col ="green")
+lines(ROCit_nb$TPR~ROCit_nb$FPR, col ="orange")
+legend("bottomright", col = c("black","yellow","blue","red","green","orange"),
+       c("Null", "knn", "C50", "randomforest", "glm", "nb"), title = 
+         "ROC curve comparisons",lwd = 2)
+```
+
+
+
+
+
+
 ## Rerun all training data with Randomforest Model and download prediction to csv file.
 
 
@@ -841,22 +863,5 @@ titanic_pred_testdata
 ```{r}
 write.table(titanic_pred_testdata, file = "testdataset-prediction.csv", sep = ",", col.names = "Titanic_prediction_test_value", qmethod = "double", row.names=FALSE)
 ```
-
-
-### **Extra Credit Answer:**  
-
-```{r}
-ROCit_null <- rocit(score=titanic_train2_null,class=titanic_train2_testing$survived, method = "emp")
-plot(ROCit_null, col ="black", legend = FALSE, YIndex = FALSE)
-lines(ROCit_knn$TPR~ROCit_knn$FPR, col ="yellow")
-lines(ROCit_C50$TPR~ROCit_C50$FPR, col ="blue")
-lines(ROCit_randomforest$TPR~ROCit_randomforest$FPR, col ="red")
-lines(ROCit_glm$TPR~ROCit_glm$FPR, col ="green")
-lines(ROCit_nb$TPR~ROCit_nb$FPR, col ="orange")
-legend("bottomright", col = c("black","yellow","blue","red","green","orange"),
-       c("Null", "knn", "C50", "randomforest", "glm", "nb"), title = 
-         "ROC curve comparisons",lwd = 2)
-```
-
 
 
