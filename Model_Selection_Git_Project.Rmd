@@ -1,0 +1,862 @@
+---
+title: "Model Selection Project"
+author: YunweiChang
+output:
+  pdf_document: default 
+  word_document: default
+  html_notebook: default
+---
+### This is a project imitating a kaggle competition where we are provided training data set with survivor information from Titanic and testing data set without survivor information from Titanic. We want to use training data to create the best model to predict survivors. Then, use the same model to predict survivors from the testing data and submit the result in a csv file and submit for kaggle competition.
+
+### In my project, I split up training dataset into training and testing data to obtain the model with highest accuracy. I have used 6 different models (Null Model, KNN, C50, Random Forest, Multiple Linear Regression, and Naive Baye) and determined Random Forest model provides the most accurate prediction. Then, I use this model to predict the testing set and save it in a csv file for submission. 
+
+```{r}
+library(pacman)
+p_load(titanic, tidyverse, janitor, naniar, DataExplorer, tidymodels, ROCit, rpart, discrim)
+```
+
+
+```{r}
+titanic_train <- titanic_train %>% clean_names()
+
+head(titanic_train)
+```
+
+
+```{r}
+get_dupes(titanic_train)
+```
+
+```{r}
+titanic_train2 <- titanic_train %>% select(-passenger_id, -name, -ticket, -cabin) %>%
+  mutate(
+    survived = as_factor(survived),
+    pclass = as_factor(pclass),
+    sex = as_factor(sex),
+    embarked = as_factor(embarked)
+  )
+
+head(titanic_train2)
+```
+
+```{r}
+summary(titanic_train2)
+```
+
+
+
+
+```{r}
+titanic_test <- titanic_test %>% clean_names()
+
+head(titanic_test)
+```
+
+
+```{r}
+get_dupes(titanic_test)
+```
+
+```{r}
+titanic_test2 <- titanic_test %>% select(-passenger_id, -name, -ticket, -cabin) %>%
+  mutate(
+    pclass = as_factor(pclass),
+    sex = as_factor(sex),
+    embarked = as_factor(embarked)
+  )
+
+head(titanic_test2)
+
+```
+
+
+```{r}
+vis_miss(titanic_train2)
+gg_miss_var(titanic_train2)
+gg_miss_var(titanic_train2, show_pct = TRUE)
+```
+
+```{r eval = FALSE}
+create_report(titanic_train2, y = "survived", output_file = "report.html", output_dir = getwd())
+```
+
+
+## Model 0:
+
+Summarize the y-variable.  Null Model.
+
+```{r}
+titanic_train2 %>% group_by(survived) %>%
+  summarize(n = n()) %>%
+  mutate(freq = n / sum(n))
+```
+
+```{r}
+titanic_train2_split <- initial_split(titanic_train2, prop = 0.8)
+titanic_train2_split
+```
+
+
+```{r}
+titanic_train2_split %>%
+  training() 
+```
+
+```{r}
+titanic_train2_recipe <- training(titanic_train2_split) %>%
+  recipe(survived ~ .) %>%
+  step_rm(pclass, sex, embarked) %>% 
+  step_nzv(all_predictors()) %>%
+  step_meanimpute(age) %>%
+  prep()
+
+summary(titanic_train2_recipe)
+
+tidy(titanic_train2_recipe)
+```
+
+
+```{r}
+titanic_train2_testing <- titanic_train2_recipe %>%
+  bake(testing(titanic_train2_split)) 
+
+titanic_train2_testing
+```
+
+```{r}
+titanic_train2_training <- juice(titanic_train2_recipe)
+
+titanic_train2_training
+```
+
+### Model 0: null
+
+
+```{r}
+null_model(mode = "classification")
+
+titanic_train2_null <- null_model() %>%
+  set_mode("classification") %>%
+  fit(survived ~ ., data = titanic_train2_training)
+
+```
+
+```{r}
+predict(titanic_train2_null, titanic_train2_training)
+```
+
+```{r}
+titanic_train2_null %>%
+  predict(titanic_train2_testing) %>%
+  bind_cols(titanic_train2_testing) 
+```
+
+
+```{r}
+titanic_train2_null %>%
+  predict(titanic_train2_testing) %>%
+  bind_cols(titanic_train2_testing) %>%
+  metrics(truth = survived, estimate = .pred_class)
+```
+
+
+
+```{r}
+titanic_train2_null %>%
+  predict(titanic_train2_testing) %>%
+  bind_cols(titanic_train2_testing) %>%
+  conf_mat(truth = survived, estimate = .pred_class)
+```
+
+```{r}
+titanic_train2_null %>%
+  predict(titanic_train2_testing, type = "prob") %>%
+  bind_cols(titanic_train2_testing) %>%
+  roc_curve(survived, .pred_0) %>%
+  autoplot() 
+```
+
+
+```{r}
+titanic_train2_null<-predict(titanic_train2_null, titanic_train2_testing)
+```
+
+
+
+```{r}
+titanic_train2_null <-as.numeric(unlist(titanic_train2_null))
+titanic_train2_testing_numeric<-as.numeric(titanic_train2_testing$survived)
+```
+
+
+
+```{r}
+library(ROCit)
+ROCit_null <- rocit(score=titanic_train2_null,class=titanic_train2_testing$survived, method = "emp")
+plot(ROCit_null)
+```
+
+
+
+### 1 Model: kNN
+
+
+```{r}
+titanic_train3 <- titanic_train %>% select(-passenger_id, -name, -ticket, -cabin, -sex, -embarked, -pclass) %>%
+  mutate(
+    survived = as_factor(survived),
+  )
+titanic_train3 <-na.omit(titanic_train3)
+head(titanic_train3)
+```
+
+
+```{r}
+normalize <- function(x) {
+  return ((x - min(x)) / (max(x) - min(x)))
+}
+
+normalize(c(1, 2, 3, 4, 5))
+normalize(c(10, 20, 30, 40, 50))
+
+```
+
+
+```{r}
+
+titanic_train3n <- as.data.frame(lapply(titanic_train3[2:5], normalize))
+
+```
+
+
+
+```{r}
+titanic_train3_split <- initial_split(titanic_train3, prop = 0.8)
+titanic_train3_split
+```
+
+
+```{r}
+titanic_train3_split %>%
+  training() 
+```
+
+```{r}
+titanic_train3_recipe <- training(titanic_train3_split) %>%
+  recipe(survived ~ .) %>%
+  step_nzv(all_predictors()) %>%
+  step_meanimpute(age) %>%
+  prep()
+
+summary(titanic_train3_recipe)
+
+tidy(titanic_train3_recipe)
+```
+
+
+```{r}
+titanic_train3_testing <- titanic_train3_recipe %>%
+  bake(testing(titanic_train3_split)) 
+
+titanic_train3_testing
+```
+
+```{r}
+titanic_train3_training <- juice(titanic_train3_recipe)
+
+titanic_train3_training
+```
+
+```{r}
+
+titanic_train3_knn <- nearest_neighbor(neighbors = 11, mode = "classification") %>% 
+  set_engine("kknn", scale = TRUE) %>%
+  fit(survived ~ ., data = titanic_train3_training)
+
+```
+
+
+
+```{r}
+predict(titanic_train3_knn, titanic_train3_training)
+```
+
+```{r}
+pred <-titanic_train3_knn %>%
+  predict(titanic_train3_testing) %>%
+  bind_cols(titanic_train3_testing) 
+pred
+```
+
+
+```{r}
+  titanic_train3_knn %>%
+  predict(titanic_train3_testing) %>%
+  bind_cols(titanic_train3_testing) %>%
+  metrics(truth = survived, estimate = .pred_class)
+```
+
+
+
+```{r}
+titanic_train3_knn %>%
+  predict(titanic_train3_testing) %>%
+  bind_cols(titanic_train3_testing) %>%
+  conf_mat(truth = survived, estimate = .pred_class)
+```
+
+
+
+```{r}
+library(yardstick)
+pred1 <- titanic_train3_testing %>%
+  select(survived) %>%
+  bind_cols(
+    predict(titanic_train3_knn, new_data = titanic_train3_testing , type = "class")
+  ) %>%
+  rename(titanic_pred_knn = .pred_class)
+```
+
+
+
+```{r}
+pred1$titanic_pred_knn<-as.numeric(pred1$titanic_pred_knn)
+pred1$survived<-as.numeric(pred1$survived)
+```
+
+
+
+
+```{r}
+library(ROCit)
+ROCit_knn <- rocit(score=pred1$titanic_pred_knn,class=pred1$survived, method = "bin")
+plot(ROCit_knn)
+```
+
+
+### Model 2: C5.0
+
+
+
+```{r}
+set.seed(3)
+titanic_train2_C50 <- boost_tree(trees = 20) %>% 
+  set_engine("C5.0") %>%
+  set_mode("classification") %>%
+  fit(survived ~ ., data = titanic_train2_training)
+
+```
+
+
+
+```{r}
+predict(titanic_train2_C50, titanic_train2_training)
+```
+
+```{r}
+titanic_train2_C50 %>%
+  predict(titanic_train2_testing) %>%
+  bind_cols(titanic_train2_testing) 
+```
+
+
+```{r}
+titanic_train2_C50 %>%
+  predict(titanic_train2_testing) %>%
+  bind_cols(titanic_train2_testing) %>%
+  metrics(truth = survived, estimate = .pred_class)
+```
+
+
+
+```{r}
+titanic_train2_C50 %>%
+  predict(titanic_train2_testing) %>%
+  bind_cols(titanic_train2_testing) %>%
+  conf_mat(truth = survived, estimate = .pred_class)
+```
+
+
+
+```{r}
+set.seed(3)
+titanic_train2_C50 %>%
+  predict(titanic_train2_testing, type = "prob") %>%
+  bind_cols(titanic_train2_testing) %>%
+  roc_curve(survived, .pred_0) %>%
+  autoplot()
+```
+
+```{r}
+titanic_train2_C50 %>%
+  predict(titanic_train2_testing, type = "prob") %>%
+  bind_cols(titanic_train2_testing) %>%
+  roc_auc(survived, .pred_0) 
+```
+ 
+
+```{r}
+titanic_pred_C50<-predict(titanic_train2_C50, titanic_train2_testing)
+```
+
+
+```{r}
+titanic_pred_C50 <-as.numeric(unlist(titanic_pred_C50))
+titanic_train2_testing_numeric<-as.numeric(titanic_train2_testing$survived)
+```
+
+
+
+```{r}
+library(ROCit)
+ROCit_C50 <- rocit(score=titanic_pred_C50 ,class=titanic_train2_testing_numeric, method = "bin")
+plot(ROCit_C50)
+```
+
+### Model 3: Random Forest
+
+Setup the model.
+
+
+```{r}
+library(Boruta)
+
+titanic_train2<- na.omit(titanic_train2)
+
+set.seed(300)
+m_rf_Boruta2 <- Boruta(survived ~ pclass + sex + age + sib_sp + parch + fare    
++ embarked , data = titanic_train2, doTrace = 2, ntree = 100)
+
+
+m_rf_Boruta2
+
+plot(m_rf_Boruta2)
+
+getConfirmedFormula(m_rf_Boruta2)
+
+attStats(m_rf_Boruta2)
+
+plotImpHistory(m_rf_Boruta2)
+```
+
+
+
+```{r}
+library(randomForest)
+library(rpart)
+
+form <- as.formula( survived ~  age + sib_sp + parch + fare    
+)
+
+titanic_tree <- decision_tree(mode = "classification") %>%
+  set_engine("rpart", control = rpart.control(cp = 0.002)) %>%
+  fit(form, data = titanic_train2_training)
+
+mod_forest1 <- rand_forest(
+  mode = "classification", 
+  mtry = 4, 
+  trees = 501
+) %>%
+  set_engine("randomForest") %>%
+  fit(form, data = titanic_train2_training)
+
+```
+
+
+```{r}
+library(caret)
+ctrl <- trainControl(method = "repeatedcv",
+                     number = 10, repeats = 10)
+
+# auto-tune a random forest
+grid_rf <- expand.grid(.mtry = c(1, 2, 3, 4))
+
+set.seed(300)
+m_rf <- train(survived ~ ., data = titanic_train2_training, method = "rf",
+              metric = "Kappa", trControl = ctrl,
+              tuneGrid = grid_rf)
+
+m_rf
+
+titanic_pred <- predict(m_rf, titanic_train2_testing)
+confusionMatrix(data=titanic_pred, titanic_train2_testing$survived)
+
+```
+
+
+## Add categorical variables to improve prediction accuracy and rerun randomforest and cross validation
+
+
+
+```{r}
+titanic_train2_recipe_rf <- training(titanic_train2_split) %>%
+  recipe(survived ~ .) %>%
+  step_nzv(all_predictors()) %>%
+  step_meanimpute(age) %>%
+  prep()
+```
+
+
+```{r}
+titanic_train2_testing_rf <- titanic_train2_recipe_rf %>%
+  bake(testing(titanic_train2_split)) 
+
+titanic_train2_testing_rf
+```
+
+```{r}
+titanic_train2_training_rf <- juice(titanic_train2_recipe_rf)
+
+titanic_train2_training_rf
+```
+
+```{r}
+library(tidyverse)
+library(magrittr)
+cols <- c("sex", "pclass", "embarked")
+titanic_train2_training_rf<-titanic_train2_training_rf %<>% mutate_at(cols, funs(factor(.)))
+titanic_train2_testing_rf <-titanic_train2_testing_rf  %<>% mutate_at(cols, funs(factor(.)))
+```
+
+
+```{r}
+library(randomForest)
+library(rpart)
+set.seed(300)
+form1 <- as.formula( survived ~ pclass + sex + age + sib_sp + parch + fare    
+)
+
+titanic_tree1 <- decision_tree(mode = "classification") %>%
+  set_engine("rpart", control = rpart.control(cp = 0.002)) %>%
+  fit(form1, data = titanic_train2_training_rf)
+
+rf <- rand_forest(
+  mode = "classification", 
+  mtry = 6, 
+  trees = 501
+) %>%
+  set_engine("randomForest") %>%
+  fit(form1, data = titanic_train2_training_rf)
+```
+```{r}
+library(yardstick)
+pred_sample1 <- titanic_train2_testing_rf %>%
+  select(survived) %>%
+  bind_cols(
+    predict(rf, new_data = titanic_train2_testing_rf , type = "class")
+  ) %>%
+  rename(titanic_tree_matrix = .pred_class)
+  
+pred_sample1 %>%
+  conf_mat(survived, titanic_tree_matrix)
+pred_sample1 %>%
+  accuracy(survived, titanic_tree_matrix)
+```
+
+```{r}
+library(caret)
+ctrl <- trainControl(method = "repeatedcv",
+                     number = 10, repeats = 10)
+
+# auto-tune a random forest
+grid_rf <- expand.grid(.mtry = c(1, 2, 3, 4, 5, 6))
+
+set.seed(300)
+m_rf1 <- train(survived ~ ., data = titanic_train2_training_rf, method = "rf",
+              metric = "Kappa", trControl = ctrl,
+              tuneGrid = grid_rf)
+
+m_rf1
+
+titanic_pred2 <- predict(m_rf1, titanic_train2_testing_rf)
+confusionMatrix(data=titanic_pred2, titanic_train2_testing_rf$survived)
+
+```
+
+
+```{r}
+titanic_pred_randomforest <-as.numeric(unlist(titanic_pred2))
+titanic_train2_testing_numeric<-as.numeric(titanic_train2_testing$survived)
+```
+
+
+
+
+```{r}
+library(ROCit)
+ROCit_randomforest <- rocit(score=titanic_pred_randomforest ,class=titanic_train2_testing_numeric, method = "bin")
+plot(ROCit_randomforest)
+```
+
+
+
+
+### Model 4: GLM
+
+Setup the model.
+
+```{r}
+titanic_train2_glm <- logistic_reg(penalty = 0.001, mixture = 0.5) %>% 
+  set_engine("glmnet") %>%
+  set_mode("classification") %>%
+  fit(survived ~ ., data = titanic_train2_training)
+
+```
+
+
+
+```{r}
+predict(titanic_train2_glm, titanic_train2_training)
+```
+
+```{r}
+titanic_train2_glm %>%
+  predict(titanic_train2_testing) %>%
+  bind_cols(titanic_train2_testing) 
+```
+
+
+```{r}
+titanic_train2_glm %>%
+  predict(titanic_train2_testing) %>%
+  bind_cols(titanic_train2_testing) %>%
+  metrics(truth = survived, estimate = .pred_class)
+```
+
+
+
+```{r}
+titanic_train2_glm %>%
+  predict(titanic_train2_testing) %>%
+  bind_cols(titanic_train2_testing) %>%
+  conf_mat(truth = survived, estimate = .pred_class)
+```
+
+```{r}
+titanic_train2_glm %>%
+  predict(titanic_train2_testing, type = "prob") %>%
+  bind_cols(titanic_train2_testing) %>%
+  roc_curve(survived, .pred_0) %>%
+  autoplot()
+```
+
+```{r}
+titanic_train2_glm %>%
+  predict(titanic_train2_testing, type = "prob") %>%
+  bind_cols(titanic_train2_testing) %>%
+  roc_auc(survived, .pred_0) 
+```
+
+```{r}
+titanic_train2_glm %>%
+  predict(titanic_train2_testing, type = "prob") %>%
+  bind_cols(titanic_train2_testing) %>%
+  ggplot() +
+  geom_density(aes(x = .pred_1, fill = survived), 
+               alpha = 0.5)
+```
+
+
+
+```{r}
+titanic_pred_glm<-predict(titanic_train2_glm, titanic_train2_testing)
+```
+
+
+
+```{r}
+titanic_pred_glm <-as.numeric(unlist(titanic_pred_glm))
+titanic_train2_testing_numeric<-as.numeric(titanic_train2_testing$survived)
+```
+
+
+
+```{r}
+library(ROCit)
+ROCit_glm <- rocit(score=titanic_pred_glm,class=titanic_train2_testing$survived, method = "bin")
+plot(ROCit_glm)
+```
+
+
+
+
+### Model 5: Naive Bayes
+
+Setup the model.
+
+```{r}
+library(klaR)
+library(htmltools)
+titanic_train2_nb <- naive_Bayes(Laplace = 1) %>% 
+  set_engine("klaR") %>%
+  set_mode("classification") %>%
+  fit(survived ~ ., data = titanic_train2_training)
+
+```
+
+
+
+```{r}
+predict(titanic_train2_nb, titanic_train2_training)
+```
+
+```{r}
+titanic_train2_nb %>%
+  predict(titanic_train2_testing) %>%
+  bind_cols(titanic_train2_testing) 
+```
+
+
+```{r}
+titanic_train2_nb %>%
+  predict(titanic_train2_testing) %>%
+  bind_cols(titanic_train2_testing) %>%
+  metrics(truth = survived, estimate = .pred_class)
+```
+
+
+
+```{r}
+titanic_train2_nb %>%
+  predict(titanic_train2_testing) %>%
+  bind_cols(titanic_train2_testing) %>%
+  conf_mat(truth = survived, estimate = .pred_class)
+```
+
+```{r}
+titanic_train2_nb %>%
+  predict(titanic_train2_testing, type = "prob") %>%
+  bind_cols(titanic_train2_testing) %>%
+  roc_curve(survived, .pred_0) %>%
+  autoplot() 
+```
+
+```{r}
+titanic_train2_nb %>%
+  predict(titanic_train2_testing, type = "prob") %>%
+  bind_cols(titanic_train2_testing) %>%
+  roc_auc(survived, .pred_0) 
+```
+
+
+```{r}
+titanic_train2_nb %>%
+  predict(titanic_train2_testing, type = "prob") %>%
+  bind_cols(titanic_train2_testing) %>%
+  ggplot() +
+  geom_density(aes(x = .pred_1, fill = survived), 
+               alpha = 0.5)
+```
+
+
+
+```{r}
+titanic_train2_nb<-predict(titanic_train2_nb, titanic_train2_testing)
+```
+
+
+
+```{r}
+titanic_train2_nb <-as.numeric(unlist(titanic_train2_nb))
+titanic_train2_testing_numeric<-as.numeric(titanic_train2_testing$survived)
+```
+
+
+
+```{r}
+library(ROCit)
+ROCit_nb <- rocit(score=titanic_train2_nb,class=titanic_train2_testing$survived, method = "bin")
+plot(ROCit_nb)
+```
+
+## Rerun all training data with Randomforest Model and download prediction to csv file.
+
+
+```{r}
+library(doMC)
+registerDoMC(cores = 8)
+```
+
+
+```{r}
+titanic_train2 <- na.omit(titanic_train2)
+```
+
+
+```{r}
+library(tidyverse)
+library(magrittr)
+cols <- c("sex", "pclass", "embarked")
+titanic_train2<-titanic_train2 %<>% mutate_at(cols, funs(factor(.)))
+```
+
+
+### create random forest to improve prediction 
+```{r}
+library(randomForest)
+library(rpart)
+set.seed(300)
+form1 <- as.formula( survived ~ pclass + sex + age + sib_sp + parch + fare    
+)
+
+titanic_tree_testdata <- decision_tree(mode = "classification") %>%
+  set_engine("rpart", control = rpart.control(cp = 0.002)) %>%
+  fit(form1, data = titanic_train2)
+
+rf_test <- rand_forest(
+  mode = "classification", 
+  mtry = 6, 
+  trees = 501
+) %>%
+  set_engine("randomForest") %>%
+  fit(form1, data = titanic_train2)
+```
+
+### cross validation and compare the training data to its own prediction. Then, predict testing data.
+
+```{r}
+library(caret)
+ctrl <- trainControl(method = "repeatedcv",
+                     number = 10, repeats = 10)
+
+# auto-tune a random forest
+grid_rf <- expand.grid(.mtry = c(1, 2, 3, 4, 5, 6))
+
+set.seed(300)
+m_rf1_test <- train(survived ~ ., data = titanic_train2, method = "rf",
+              metric = "Kappa", trControl = ctrl,
+              tuneGrid = grid_rf)
+
+m_rf1_test
+
+titanic_pred_traindata <- predict(m_rf1_test, titanic_train2)
+confusionMatrix(data=titanic_pred_traindata, titanic_train2$survived)
+titanic_pred_testdata <- predict(m_rf1_test, titanic_test2)
+titanic_pred_testdata
+
+```
+
+
+
+```{r}
+write.table(titanic_pred_testdata, file = "testdataset-prediction.csv", sep = ",", col.names = "Titanic_prediction_test_value", qmethod = "double", row.names=FALSE)
+```
+
+
+### **Extra Credit Answer:**  
+
+```{r}
+ROCit_null <- rocit(score=titanic_train2_null,class=titanic_train2_testing$survived, method = "emp")
+plot(ROCit_null, col ="black", legend = FALSE, YIndex = FALSE)
+lines(ROCit_knn$TPR~ROCit_knn$FPR, col ="yellow")
+lines(ROCit_C50$TPR~ROCit_C50$FPR, col ="blue")
+lines(ROCit_randomforest$TPR~ROCit_randomforest$FPR, col ="red")
+lines(ROCit_glm$TPR~ROCit_glm$FPR, col ="green")
+lines(ROCit_nb$TPR~ROCit_nb$FPR, col ="orange")
+legend("bottomright", col = c("black","yellow","blue","red","green","orange"),
+       c("Null", "knn", "C50", "randomforest", "glm", "nb"), title = 
+         "ROC curve comparisons",lwd = 2)
+```
+
+
+
